@@ -34,6 +34,12 @@
  <portal_type id="Callable Tool">
   <item>PyData Script</item>
   <item>Python Script</item>
+ <portal_type id="Catalog">
+  <item>Python Script</item>
+  <item>SQL Method</item>
+ </portal_type>
+ <portal_type id="Catalog Tool">
+  <item>Catalog</item>
  </portal_type>
  <portal_type id="Category">
   <item>Category</item>
