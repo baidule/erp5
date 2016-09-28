@@ -223,6 +223,46 @@ class ERP5Catalog(Folder, Catalog):
         return md.get('type', 'string')
     return None
 
+  ##### Overriding setters functions for multple_selection properties #######
+  #####   Required as after every edit we expect the values sorted    #######
+
+  def _setSqlClearCatalogList(self, value, **kw):
+    self._baseSetSqlClearCatalogList(sorted(value), **kw)
+
+  def _setSqlCatalogFullTextSearchKeysList(self, value, **kw):
+    self._baseSetSqlCatalogFullTextSearchKeysList(sorted(value), **kw)
+
+  def _setSqlCatalogObjectListList(self, value, **kw):
+    self._baseSetSqlCatalogObjectListList(sorted(value), **kw)
+
+  def _setSqlUncatalogObjectList(self, value, **kw):
+    self._baseSetSqlUncatalogObjectList(sorted(value), **kw)
+
+  def _setSqlSearchTablesList(self, value, **kw):
+    self._baseSetSqlSearchTablesList(sorted(value), **kw)
+
+  def _setSqlCatalogDatetimeSearchKeysList(self, value, **kw):
+    value = sorted(value)
+    self._baseSetSqlCatalogDatetimeSearchKeysList(sorted(value), **kw)
+
+  def _setSqlCatalogKeywordSearchKeysList(self, value, **kw):
+    self._baseSetSqlCatalogKeywordSearchKeysList(sorted(value), **kw)
+
+  def _setSqlCatalogMultivalueKeysList(self, value, **kw):
+    self._baseSetSqlCatalogMultivalueKeysList(sorted(value), **kw)
+
+  def _setSqlCatalogRequestKeysList(self, value, **kw):
+    self._baseSetSqlCatalogRequestKeysList(sorted(value), **kw)
+
+  def _setSqlCatalogIndexOnOrderKeysList(self, value, **kw):
+    self._baseSetSqlCatalogIndexOnOrderKeysList(sorted(value), **kw)
+
+  def _setSqlCatalogTableVoteScriptsList(self, value, **kw):
+    self._baseSetSqlCatalogTableVoteScriptsList(sorted(value), **kw)
+
+  def _setSqlSearchResultKeysList(self, value, **kw):
+    self._baseSetSqlSearchResultKeysList(sorted(value), **kw)
+
   security.declarePublic('getCatalogMethodIds')
   def getCatalogMethodIds(self,
       valid_method_meta_type_list=valid_method_meta_type_list_new):
