@@ -765,8 +765,9 @@ class TestProxyField(ERP5TypeTestCase):
     proxy_field.manage_edit_xmlrpc(dict(form_id='Base_viewProxyFieldLibrary',
                                         field_id='my_date',))
     self.assertTrue(hasattr(proxy_field, 'sub_form'))
-    self.assertTrue(aq_base(proxy_field.sub_form) is
-                      aq_base(original_field.sub_form))
+    self.assertEqual(proxy_field.sub_form.render(),
+                     original_field.sub_form.render())
+
     # we can render
     proxy_field.render()
     # and validate
@@ -987,41 +988,6 @@ class TestFieldValueCache(ERP5TypeTestCase):
     self.root.form.proxy_field_tales.get_value('title')
     self.assertEqual(True, cache_size == self._getCacheSize('ProxyField.get_value'))
 
-  def test_datetime_field(self):
-    field_value_cache.clear()
-
-    # make sure that boundmethod must not be cached.
-    year_field = self.root.form.datetime_field.sub_form.get_field('year', include_disabled=1)
-    self.assertEqual(True, type(year_field.overrides['items']) is BoundMethod)
-
-    cache_size = len(field_value_cache)
-    year_field.get_value('items')
-
-    # See Formulator/StandardFields.py(line:174)
-    # there are two get_value, start_datetime and end_datetime
-    cache_size += 2
-
-    # make sure that boundmethod is not cached(cache size does not change)
-    self.assertEqual(True, ('Form.get_value',
-                            self.root.form.datetime_field._p_oid,
-                            self.root.form.datetime_field._p_oid,
-                            'start_datetime'
-                            ) in field_value_cache)
-    self.assertEqual(True, ('Form.get_value',
-                            self.root.form.datetime_field._p_oid,
-                            self.root.form.datetime_field._p_oid,
-                            'end_datetime'
-                            ) in field_value_cache)
-    self.assertEqual(False, ('Form.get_value',
-                            year_field._p_oid,
-                            year_field._p_oid,
-                            'items'
-                            ) in field_value_cache)
-    self.assertEqual(cache_size, len(field_value_cache))
-
-    year_field.get_value('size')
-    year_field.get_value('default')
-    self.assertEqual(cache_size+2, len(field_value_cache))
 
 def makeDummyOid():
   import time, random
