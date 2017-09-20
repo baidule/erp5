@@ -764,14 +764,30 @@ class TestProxyField(ERP5TypeTestCase):
                                 'my_date', 'Date', 'ProxyField')
     proxy_field.manage_edit_xmlrpc(dict(form_id='Base_viewProxyFieldLibrary',
                                         field_id='my_date',))
-    self.assertTrue(hasattr(proxy_field, 'sub_form'))
-    self.assertEqual(proxy_field.sub_form.render(),
-                     original_field.sub_form.render())
+    self.assertTrue(hasattr(proxy_field, '_get_sub_form'))
+    self.assertEqual(proxy_field._get_sub_form().render(),
+                     original_field._get_sub_form().render())
 
     # we can render
     proxy_field.render()
     # and validate
     self.container.Base_view.validate_all_to_request(self.portal.REQUEST)
+
+    # change style in the original field
+    original_field.manage_edit_xmlrpc(dict(input_style='number'))
+    self.assertTrue('type="number"' in original_field.render())
+    self.assertTrue('type="number"' in proxy_field.render())
+
+    # override style in the proxy field
+    original_field.manage_edit_xmlrpc(dict(input_style='text'))
+    proxy_field._surcharged_edit({'input_style': 'number'}, ['input_style'])
+    self.assertTrue('type="text"' in original_field.render())
+    self.assertTrue('type="number"' in proxy_field.render())
+
+    # unproxify the proxy field
+    self.container.Base_view.unProxifyField({'my_date': 'on'})
+    unproxified_field = self.container.Base_view.my_date
+    self.assertTrue('type="number"' in unproxified_field.render())
 
   def test_manage_edit_surcharged_xmlrpc(self):
     # manage_edit_surcharged_xmlrpc is a method to edit proxyfields
@@ -943,7 +959,7 @@ class TestFieldValueCache(ERP5TypeTestCase):
     addField(DateTimeField('datetime_field'))
     form.datetime_field._p_oid = makeDummyOid()
     form.datetime_field._edit(dict(input_style='list'))
-    for i in form.datetime_field.sub_form.fields.values():
+    for i in form.datetime_field._get_sub_form().fields.values():
       i._p_oid = makeDummyOid()
 
   def test_method_field(self):

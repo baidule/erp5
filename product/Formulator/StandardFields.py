@@ -127,9 +127,10 @@ class DateTimeField(ZMIField):
   widget = Widget.DateTimeWidgetInstance
   validator = Validator.DateTimeValidatorInstance
 
-  @property
-  def sub_form(self):
-    input_style = self.get_value('input_style')
+  def _get_sub_form(self, field=None):
+    if field is None:
+      field = self
+    input_style = field.get_value('input_style')
     if input_style == 'text':
       return create_datetime_text_sub_form(self)
     elif input_style == 'list':
