@@ -38,7 +38,7 @@ Usage:
     <tr tal:condition="exists:date">
         <td>assertText</td>
         <td>${current_row}/td[2]//p</td>
-        <td tal:content="string:$date"></td></tr>   
+        <td tal:content="string:$date"></td></tr>
     <tr tal:condition="exists:title">
         <td>assertText</td>
         <td>${current_row}/td[3]//a</td>
@@ -57,11 +57,11 @@ Usage:
         <td tal:content="string:$mirror_section_title"></td></tr>
     <tr tal:condition="exists:debit">
         <td>assertFloat</td>
-        <td>${current_row}/td[7]//div[@data-gadget-url="${renderjs_url}/gadget_html5_element.html"]/div</td>
+        <td>${current_row}/td[7]//div[@data-gadget-url="${renderjs_url}/gadget_html5_element.html"]/p</td>
         <td tal:content="string:$debit"></td></tr>
     <tr tal:condition="exists:credit">
         <td>assertFloat</td>
-        <td>${current_row}/td[8]//div[@data-gadget-url="${renderjs_url}/gadget_html5_element.html"]/div</td>
+        <td>${current_row}/td[8]//div[@data-gadget-url="${renderjs_url}/gadget_html5_element.html"]/p</td>
         <td tal:content="string:$credit"></td></tr>
     </tal:block>
 
@@ -103,15 +103,15 @@ Usage:
         <td tal:content="string:$getTranslatedSimulationStateTitle"></td></tr>
     <tr tal:condition="exists:debit_price">
         <td>assertFloat</td>
-        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/div'.format(offset + 8)"></td>
+        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/p'.format(offset + 8)"></td>
         <td tal:content="string:$debit_price"></td></tr>
     <tr tal:condition="exists:credit_price">
         <td>assertFloat</td>
-        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/div'.format(offset + 9)"></td>
+        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/p'.format(offset + 9)"></td>
         <td tal:content="string:$credit_price"></td></tr>
     <tr tal:condition="exists:running_total_price">
         <td>assertFloat</td><!-- Balance -->
-        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/div'.format(offset + 10)"></td>
+        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/p'.format(offset + 10)"></td>
         <td tal:content="string:$running_total_price"></td></tr>
     </tal:block>
 
@@ -142,20 +142,20 @@ Usage:
         <td tal:content="string:$Movement_getExplanationTitleAndAnalytics"></td></tr>
     <tr tal:condition="exists:debit_price">
         <td>assertFloat</td>
-        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/div'.format(offset + 5)"></td>
+        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/p'.format(offset + 5)"></td>
         <td tal:content="string:$debit_price"></td></tr>
     <tr tal:condition="exists:credit_price">
         <td>assertFloat</td>
-        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/div'.format(offset + 6)"></td>
+        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/p'.format(offset + 6)"></td>
         <td tal:content="string:$credit_price"></td></tr>
     <tr tal:condition="exists:running_total_price">
         <td>assertFloat</td><!-- Balance -->
-        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/div'.format(offset + 7)"></td>
+        <td tal:content="python: '${{current_row}}/td[{:d}]//div[contains(@data-gadget-url, \'gadget_html5_element.html\')]/p'.format(offset + 7)"></td>
         <td tal:content="string:$running_total_price"></td></tr>
     <!-- Grouping Reference -->
     <!-- Grouping Date -->
     <!-- State -->
-    
+
     </tal:block>
 
     <!-- Following macro checks values in generally used "Balance Table".
@@ -164,7 +164,7 @@ Usage:
     <tal:block metal:define-macro='check_row_in_balance_table'>
 
     <tr><td>store</td><td tal:content="string:$row_selector"></td><td>current_row</td></tr>
-    <tr><td>store</td><td>div[@data-gadget-url="${renderjs_url}/gadget_html5_element.html"]/div</td><td>float_val</td></tr>
+    <tr><td>store</td><td>div[@data-gadget-url="${renderjs_url}/gadget_html5_element.html"]/p</td><td>float_val</td></tr>
     <tr tal:condition="exists:node_id">
       <td>assertText</td>
       <td>${current_row}/td[1]//a</td>
@@ -224,6 +224,6 @@ Usage:
     	<td tal:condition="exists:final_balance_if_credit" tal:content="string:$final_balance_if_credit"></td>
     	<td tal:condition="not:exists:final_balance_if_credit">0</td></tr>
     </tal:block>
-  
+
   </body>
 </html>
