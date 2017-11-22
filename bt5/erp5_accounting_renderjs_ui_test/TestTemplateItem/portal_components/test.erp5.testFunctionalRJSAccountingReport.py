@@ -32,7 +32,7 @@ from Products.ERP5Type.tests.ERP5TypeFunctionalTestCase import ERP5TypeFunctiona
 
 class TestRenderJSAccountingReport(ERP5TypeFunctionalTestCase):
   foreground = 0
-  run_only = "renderjs_ui_accounting_zuite/test_accounting_report"
+  run_only = "renderjs_ui_accounting_report_zuite"
 
   def getBusinessTemplateList(self):
     return (

@@ -14,7 +14,7 @@
         </item>
         <item>
             <key> <string>id</string> </key>
-            <value> <string>test_accounting_report</string> </value>
+            <value> <string>renderjs_ui_accounting_report_zuite</string> </value>
         </item>
         <item>
             <key> <string>title</string> </key>
