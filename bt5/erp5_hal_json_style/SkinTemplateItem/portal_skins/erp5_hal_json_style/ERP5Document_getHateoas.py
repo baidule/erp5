@@ -49,7 +49,49 @@ def byteify(string):
   else:
     return string
 
+def ensure_serializable(obj):
+  """Ensure obj and all sub-objects are JSON serializable."""
+  if isinstance(obj, dict):
+    for key in obj:
+      obj[key] = ensure_serializable(obj[key])
+  # throw away date's type information and later reconstruct as Zope's DateTime
+  if isinstance(obj, DateTime):
+    return obj.ISO()
+  if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
+    return obj.isoformat()
+  # we don't check other isinstances - we believe that iterables don't contain unserializable objects
+  return obj
+
+datetime_iso_re = re.compile(r'^\d{4}-\d{2}-\d{2} |T\d{2}:\d{2}:\d{2}.*$')
+time_iso_re = re.compile(r'^(\d{2}):(\d{2}):(\d{2}).*$')
+def ensure_deserialized(obj):
+  """Deserialize classes serialized by our own `ensure_serializable`.
+
+  Method `biteify` must not be called on the result because it would revert out
+  deserialization by calling __str__ on constructed classes.
+  """
+  if isinstance(obj, dict):
+    for key in obj:
+      obj[key] = ensure_deserialized(obj[key])
+  # seems that default __str__ method is good enough
+  if isinstance(obj, str):
+    # Zope's DateTime must be good enough for everyone
+    if datetime_iso_re.match(obj):
+      return DateTime(obj)
+    if time_iso_re.match(obj):
+      match_obj = time_iso_re.match(obj)
+      return datetime.time(*tuple(map(int, match_obj.groups())))
+  return obj
+
+
 def getProtectedProperty(document, select):
+  """getProtectedProperty is a security-aware substitution for builtin `getattr`
+
+  It resolves Properties on Products (visible via Zope Formulator), which are
+  accessible as ordinary attributes as well, by following security rules.
+
+  See https://lab.nexedi.com/nexedi/erp5/blob/master/product/ERP5Form/ListBox.py#L2293
+  """
   try:
     #see https://lab.nexedi.com/nexedi/erp5/blob/master/product/ERP5Form/ListBox.py#L2293
     try:
@@ -371,8 +413,11 @@ def renderField(traversed_document, field, form, value=None, meta_type=None, key
         "relative_url": traversed_document.getRelativeUrl().replace("/", "%2F"),
         "form_relative_url": "%s/%s" % (getFormRelativeUrl(form), field.id),
         "list_method": list_method_name,
-        "default_param_json": urlsafe_b64encode(json.dumps(list_method_query_dict))
+        "default_param_json": urlsafe_b64encode(
+          json.dumps(ensure_serializable(list_method_query_dict)))
       }
+      # once we imprint `default_params` into query string of 'list method' we
+      # don't want them to propagate to the query as well
       list_method_query_dict = {}
     elif (list_method_name == "portal_catalog"):
       pass
@@ -384,7 +429,7 @@ def renderField(traversed_document, field, form, value=None, meta_type=None, key
         "script_id": script.id,
         "relative_url": traversed_document.getRelativeUrl().replace("/", "%2F"),
         "list_method": list_method_name,
-        "default_param_json": urlsafe_b64encode(json.dumps(list_method_query_dict))
+        "default_param_json": urlsafe_b64encode(json.dumps(ensure_serializable(list_method_query_dict)))
       }
       list_method_query_dict = {}
 
@@ -416,7 +461,7 @@ def renderField(traversed_document, field, form, value=None, meta_type=None, key
       "show_anchor": field.get_value("anchor"),
       "portal_type": portal_types,
       "lines": lines,
-      "default_params": default_params,
+      "default_params": ensure_serializable(default_params),
       "list_method": list_method_name,
       "query": url_template_dict["jio_search_template"] % {
         "query": make_query({
