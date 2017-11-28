@@ -37,7 +37,7 @@
 
 <tr>
   <td>open</td>
-  <td>${base_url}/foo_module/FooModule_viewFooList/listbox/ListBox_setPropertyList?field_columns=id%7CID%0Atitle%7CTitle%0Adelivery.quantity%7CQuantity&amp;field_sort=id+%7C+DESC</td>
+  <td>${base_url}/foo_module/FooModule_viewFooList/listbox/ListBox_setPropertyList?field_columns=id%7CID%0Atitle%7CTitle%0Adelivery.quantity%7CQuantity&amp;field_sort=id+%7C+ASC</td>
   <td></td>
 </tr>
 
@@ -66,14 +66,14 @@
 <!-- check quanlity is display correctly -->
 <tr>
   <td>waitForElementPresent</td>
-  <td>//a[@class='ui-link' and text() ='1']</td>
+  <td>//a[@class='ui-link']//p[text()='1']</td><!-- cell has field template thus rendered inside html5_element_gadget -->
   <td></td>
 </tr>
 
 
 <tr>
   <td>verifyElementPresent</td>
-  <td>//a[@class='ui-link' and text() ='1']</td>
+  <td>//a[@class='ui-link']//p[text()='1']</td>
   <td></td>
 </tr>
 

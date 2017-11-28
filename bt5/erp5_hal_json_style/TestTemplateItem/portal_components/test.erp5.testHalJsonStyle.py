@@ -1266,13 +1266,11 @@ class TestERP5Document_getHateoas_mode_worklist(ERP5HALJSONStyleSkinsMixin):
     )
     result_dict = json.loads(result)
     self.assertEqual(result_dict['_links']['self'], {"href": "http://example.org/bar"})
-
-    work_list = [x for x in result_dict['worklist'] if x['name'].startswith('Draft To Validate')]
-    self.assertEqual(len(work_list), 1)
-    self.assertTrue(work_list[0]['count'] > 0)
-    self.assertEqual(work_list[0]['name'], 'Draft To Validate')
-    self.assertFalse('module' in work_list[0])
-    self.assertEqual(work_list[0]['href'], 'urn:jio:allDocs?query=portal_type%3A%28%22Bar%22%20OR%20%22Foo%22%29%20AND%20simulation_state%3A%22draft%22')
+    self.assertEqual(len(result_dict['worklist']), 1)
+    self.assertTrue(result_dict['worklist'][0]['count'] > 0)
+    self.assertEqual(result_dict['worklist'][0]['name'], 'Draft To Validate')
+    self.assertFalse('module' in result_dict['worklist'][0])
+    self.assertEqual(result_dict['worklist'][0]['href'], 'urn:jio:allDocs?query=portal_type%3A%28%22Bar%22%20OR%20%22Foo%22%29%20AND%20simulation_state%3A%22draft%22')
 
     self.assertEqual(result_dict['_debug'], "worklist")
 
@@ -1355,9 +1353,9 @@ return msg"
             'return "application/hal+json"')
   @simulate('Base_translateString', 'msg, catalog="ui", encoding="utf8", lang="wo", **kw',
   code_string)
+  @createIndexedDocument()
   @changeSkin('Hal')
-  def test_getHateoasWorklist_default_view_translation(self):
-    # self._makeDocument()
+  def test_getHateoasWorklist_default_view_translation(self, document):
     fake_request = do_fake_request("GET")
     result = self.portal.web_site_module.hateoas.ERP5Document_getHateoas(
       REQUEST=fake_request,
@@ -1369,12 +1367,11 @@ return msg"
     )
     result_dict = json.loads(result)
     self.assertEqual(result_dict['_links']['self'], {"href": "http://example.org/bar"})
-    work_list = [x for x in result_dict['worklist'] if x['name'].startswith('daiyanzhen')]
-    self.assertEqual(len(work_list), 1)
-    self.assertEqual(work_list[0]['name'], 'daiyanzhen')
-    self.assertTrue(work_list[0]['count'] > 0)
-    self.assertFalse('module' in work_list[0])
-    self.assertEqual(work_list[0]['href'], 'urn:jio:allDocs?query=portal_type%3A%28%22Bar%22%20OR%20%22Foo%22%29%20AND%20simulation_state%3A%22draft%22')
+    self.assertEqual(len(result_dict['worklist']), 1)
+    self.assertEqual(result_dict['worklist'][0]['name'], 'daiyanzhen')
+    self.assertTrue(result_dict['worklist'][0]['count'] > 0)
+    self.assertFalse('module' in result_dict['worklist'][0])
+    self.assertEqual(result_dict['worklist'][0]['href'], 'urn:jio:allDocs?query=portal_type%3A%28%22Bar%22%20OR%20%22Foo%22%29%20AND%20simulation_state%3A%22draft%22')
 
     self.assertEqual(result_dict['_debug'], "worklist")
 
@@ -1404,7 +1401,7 @@ class TestERP5Action_getHateoas(ERP5HALJSONStyleSkinsMixin):
   @changeSkin('Hal')
   def test_getHateoasDialog_dialog_failure(self, document):
     """Test an dialog on Foo object with empty required for a failure.
-    
+
     Expected behaviour is response Http 400 with field errors.
     """
     fake_request = do_fake_request("POST")
