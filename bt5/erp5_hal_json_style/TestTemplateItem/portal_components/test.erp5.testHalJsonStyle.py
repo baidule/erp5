@@ -647,6 +647,42 @@ class TestERP5Document_getHateoas_mode_traverse(ERP5HALJSONStyleSkinsMixin):
   @simulate('Base_getRequestHeader', '*args, **kwargs',
             'return "application/hal+json"')
   @changeSkin('Hal')
+  def test_getHateoasDocument_listbox_vs_relation_inconsistency(self):
+    """Purpose of this test is to point to inconsistencies in search-enabled field rendering.
+
+    ListBox gets its Portal Types in `portal_type` as list of tuples whether
+    Relation Input receives `portal_types` and `translated_portal_types`
+    """
+    document = self._makeDocument()
+    # Drop editable permission
+    document.manage_permission('Modify portal content', [], 0)
+    document.Foo_view.listbox.ListBox_setPropertyList(
+      field_title = 'Foo Lines',
+      field_list_method = 'objectValues',
+      field_portal_types = 'Foo Line | Foo Line',
+    )
+    fake_request = do_fake_request("GET")
+    result = self.portal.web_site_module.hateoas.ERP5Document_getHateoas(
+      REQUEST=fake_request,
+      mode="traverse",
+      relative_url=document.getRelativeUrl(),
+      view="view")
+    self.assertEquals(fake_request.RESPONSE.status, 200)
+    self.assertEquals(fake_request.RESPONSE.getHeader('Content-Type'),
+      "application/hal+json"
+    )
+    result_dict = json.loads(result)
+    # ListBox rendering of allowed Portal Types
+    self.assertEqual(result_dict['_embedded']['_view']['listbox']['portal_type'], [['Foo Line', 'Foo Line']])
+    # Relation Input rendering of allowed Portal Types
+    self.assertEqual(result_dict['_embedded']['_view']['my_foo_category_title']['portal_types'], ['Category'])
+    self.assertEqual(result_dict['_embedded']['_view']['my_foo_category_title']['translated_portal_types'], ['Category'])
+
+  @simulate('Base_getRequestUrl', '*args, **kwargs',
+      'return "http://example.org/bar"')
+  @simulate('Base_getRequestHeader', '*args, **kwargs',
+            'return "application/hal+json"')
+  @changeSkin('Hal')
   def test_getHateoasDocument_non_editable_default_view(self):
     document = self._makeDocument()
     # Drop editable permission
