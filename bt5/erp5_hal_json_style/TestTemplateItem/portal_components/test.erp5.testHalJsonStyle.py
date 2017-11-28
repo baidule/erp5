@@ -9,8 +9,11 @@ from functools import wraps
 from ZPublisher.HTTPRequest import HTTPRequest
 from ZPublisher.HTTPResponse import HTTPResponse
 
+import base64
+import DateTime
 import StringIO
 import json
+import re
 import urllib
 
 def changeSkin(skin_name):
@@ -74,7 +77,7 @@ def createIndexedDocument():
     return wrapped
   return decorator
 
-def do_fake_request(request_method, headers=None):
+def do_fake_request(request_method, headers=None, data=()):
   __version__ = "0.1"
   if (headers is None):
     headers = {}
@@ -93,7 +96,25 @@ def do_fake_request(request_method, headers=None):
   env['GATEWAY_INTERFACE']='CGI/1.1 '
   env['SCRIPT_NAME']='Main'
   env.update(headers)
-  return HTTPRequest(StringIO.StringIO(), env, HTTPResponse())
+  body_stream = StringIO.StringIO()
+
+  # for some mysterious reason QUERY_STRING does not get parsed into data fields
+  if data and request_method.upper() == 'GET':
+    # see: GET http://www.cgi101.com/book/ch3/text.html
+    env['QUERY_STRING'] = '&'.join(
+      '{}={}'.format(urllib.quote_plus(key), urllib.quote(value))
+      for key, value in data
+    )
+
+  if data and request_method.upper() == 'POST':
+    # see: POST request body https://tools.ietf.org/html/rfc1866#section-8.2.1
+    env['CONTENT_TYPE'] = 'application/x-www-form-urlencoded'
+    for key, value in data:
+      body_stream.write('{}={!s}&'.format(
+        urllib.quote_plus(key), urllib.quote(value)))
+
+  return HTTPRequest(body_stream, env, HTTPResponse())
+
 
 from Products.ERP5Type.tests.ERP5TypeTestCase import ERP5TypeTestCase
 
@@ -681,6 +702,71 @@ class TestERP5Document_getHateoas_mode_traverse(ERP5HALJSONStyleSkinsMixin):
 
     self.assertFalse(result_dict['_embedded']['_view'].has_key('_actions'))
 
+
+  @simulate('Base_getRequestUrl', '*args, **kwargs',
+      'return "http://example.org/bar"')
+  @simulate('Base_getRequestHeader', '*args, **kwargs',
+            'return "application/hal+json"')
+  @changeSkin('Hal')
+  def test_getHateoasDocument_listbox_list_method_params(self):
+    """Ensure that `list_method` of ListBox receives specified parameters."""
+    document = self._makeDocument()
+    document.manage_permission('Modify portal content', [], 0)
+    # pass custom list method which expect input arguments
+    document.Foo_view.listbox.ListBox_setPropertyList(
+      field_title = 'Foo Lines',
+      field_list_method = 'Foo_listWithInputParams',
+      field_portal_types = 'Foo Line | Foo Line',
+      field_columns = 'id|ID\ntitle|Title\nquantity|Quantity\nstart_date|Date\ncatalog.uid|Uid')
+
+    now = DateTime.DateTime()
+    tomorrow = now + 1
+
+    fake_request = do_fake_request("GET", data=(
+      ('start_date', now.ISO()),
+      ('stop_date', tomorrow.ISO()))
+    )
+    # I tried to implement the standard way (see `data` param in do_fake_request)
+    # but for some reason it does not work...so we hack our way around
+    fake_request.set('start_date', now.ISO())
+    fake_request.set('stop_date', tomorrow.ISO())
+    result = self.portal.web_site_module.hateoas.ERP5Document_getHateoas(
+      REQUEST=fake_request,
+      mode="traverse",
+      relative_url=document.getRelativeUrl(),
+      form=document.restrictedTraverse('portal_skins/erp5_ui_test/Foo_view'),
+      view="view"
+      )
+
+    self.assertEquals(fake_request.RESPONSE.status, 200)
+    self.assertEquals(fake_request.RESPONSE.getHeader('Content-Type'),
+      "application/hal+json"
+    )
+    result_dict = json.loads(result)
+    list_method_template = \
+      result_dict['_embedded']['_view']['listbox']['list_method_template']
+    # default_param_json must not be empty because our custom list method
+    # specifies input parameters - they need to be filled from REQUEST
+    self.assertIn('default_param_json', list_method_template)
+    default_param_json = json.loads(
+      base64.b64decode(
+        re.search(r'default_param_json=([^\{&]+)',
+                  list_method_template).group(1)))
+    self.assertIn("start_date", default_param_json)
+    self.assertEqual(default_param_json["start_date"], now.ISO())
+    self.assertIn("stop_date", default_param_json)
+    self.assertEqual(default_param_json["stop_date"], tomorrow.ISO())
+    # reset listbox properties to defaults
+    document.Foo_view.listbox.ListBox_setPropertyList(
+      field_title = 'Foo Lines',
+      field_list_method = 'objectValues',
+      field_portal_types = 'Foo Line | Foo Line',
+      field_stat_method = 'portal_catalog',
+      field_stat_columns = 'quantity | Foo_statQuantity',
+      field_editable = 1,
+      field_columns = 'id|ID\ntitle|Title\nquantity|Quantity\nstart_date|Date\ncatalog.uid|Uid',
+      field_editable_columns = 'id|ID\ntitle|Title\nquantity|quantity\nstart_date|Date',
+      field_search_columns = 'id|ID\ntitle|Title\nquantity|Quantity\nstart_date|Date',)
 
   @simulate('Base_getRequestUrl', '*args, **kwargs',
       'return "http://example.org/bar"')

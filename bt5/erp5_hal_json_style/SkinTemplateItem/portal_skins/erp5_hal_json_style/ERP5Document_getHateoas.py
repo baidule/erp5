@@ -31,6 +31,8 @@ import time
 from email.Utils import formatdate
 import re
 from zExceptions import Unauthorized
+from Products.ERP5Type.Utils import UpperCase
+from Products.ZSQLCatalog.SQLCatalog import Query, ComplexQuery
 
 if REQUEST is None:
   REQUEST = context.REQUEST
@@ -384,27 +386,78 @@ def renderField(traversed_document, field, form, value=None, meta_type=None, key
 
     # try to get specified sortable columns and fail back to searchable fields
     sort_column_list = [(name, _translate(title))
-                        for name, title in field.get_value("sort_columns")
+                        for name, title in (selection_params.get('selection_sort_order', [])
+                                            or field.get_value("sort_columns"))
                         if sql_catalog.isValidColumn(name)] or search_column_list
+    # portal_type list can be overriden by selection too
+    # since it can be intentionally empty we don't override with non-empty field value
+    portal_type_list = selection_params.get("portal_type", field.get_value('portal_types'))
 
     # requirement: get only sortable/searchable columns which are already displayed in listbox
     # see https://lab.nexedi.com/nexedi/erp5/blob/HEAD/product/ERP5Form/ListBox.py#L1004
     # implemented in javascript in the end
     # see https://lab.nexedi.com/nexedi/erp5/blob/master/bt5/erp5_web_renderjs_ui/PathTemplateItem/web_page_module/rjs_gadget_erp5_listbox_js.js#L163
 
-    portal_types = field.get_value('portal_types')
-    default_params = dict(field.get_value('default_params'))
+    default_params = dict(field.get_value('default_params'))  # default_params is a list of tuples
     default_params['ignore_unknown_columns'] = True
-    if selection_params is not None:
-      default_params.update(selection_params)
-    # How to implement pagination?
-    # default_params.update(REQUEST.form)
+    # we abandoned Selections in RJS thus we mix selection query parameters into
+    # listbox's default parameters
+    default_params.update(selection_params)
+
     lines = field.get_value('lines')
     list_method_name = traversed_document.Listbox_getListMethodName(field)
-    list_method_query_dict = dict(
-      portal_type=[x[1] for x in portal_types], **default_params
-    )
+
+    # ListBoxes in report view has portal_type defined already in default_params
+    # in that case we prefer non_empty version
+    list_method_query_dict = default_params.copy()
+    if not list_method_query_dict.get("portal_type", []):
+      list_method_query_dict["portal_type"] = [x for x, _ in portal_type_list]
     list_method_custom = None
+
+    # Search for non-editable documents - all reports goes here
+    # Reports have custom search scripts which wants parameters from the form
+    # thus we introspect such parameters and try to find them in REQUEST
+    list_method = None
+    if list_method_name and list_method_name not in ("portal_catalog", "searchFolder", "objectValues"):
+      # we avoid accessing known protected objects and builtin functions above
+      try:
+        list_method = getattr(traversed_document, list_method_name)
+      except (Unauthorized, AttributeError, ValueError) as error:
+        # we are touching some specially protected (usually builtin) methods
+        # which we will not introspect
+        context.log('ListBox {!s} list_method {} is unavailable because of "{!s}"'.format(
+          field, list_method_name, error), level=100)
+
+    # Put all ListBox's search method params from REQUEST to `default_param_json`
+    # because old code expects synchronous render thus having all form's values
+    # still in the request which is not our case because we do asynchronous rendering
+    if list_method is not None and hasattr(list_method, "ZScriptHTML_tryParams"):
+      for list_method_param in list_method.ZScriptHTML_tryParams():
+        if list_method_param in REQUEST and list_method_param not in list_method_query_dict:
+          list_method_query_dict[list_method_param] = REQUEST.get(list_method_param)
+      # MIDDLE-DANGEROUS!
+      # In case of reports (later even exports) substitute None for unknown
+      # parameters. We suppose Python syntax for parameters!
+      # What we do here is literally putting every form field from REQUEST
+      # into search method parameters - this is later put back into REQUEST
+      # this way we can mimic synchronous rendering when all form field values
+      # were available in REQUEST. It is obviously wrong behaviour.
+      for list_method_param in list_method.params().split(","):
+        if "*" in list_method_param:
+          continue
+        if "=" in list_method_param:
+          continue
+        # now we have only mandatory parameters
+        list_method_param = list_method_param.strip()
+        if list_method_param not in list_method_query_dict:
+          list_method_query_dict[list_method_param] = None
+      # Now if the list_method does not specify **kwargs we need to remove
+      # unwanted parameters like "portal_type" which is everywhere
+      if "**" not in list_method.params():
+        _param_key_list = tuple(list_method_query_dict.keys()) # copy the keys
+        for param_key in _param_key_list:
+          if param_key not in list_method.params():  # we search in raw string
+            del list_method_query_dict[param_key]    # but it is enough
 
     if (editable_column_list):
       list_method_custom = url_template_dict["custom_search_template"] % {
@@ -459,7 +512,7 @@ def renderField(traversed_document, field, form, value=None, meta_type=None, key
       "sort_column_list": sort_column_list,
       "editable_column_list": editable_column_list,
       "show_anchor": field.get_value("anchor"),
-      "portal_type": portal_types,
+      "portal_type": portal_type_list,
       "lines": lines,
       "default_params": ensure_serializable(default_params),
       "list_method": list_method_name,
