@@ -1081,150 +1081,338 @@ def calculateHateoas(is_portal=None, is_site_root=None, traversed_document=None,
               "template": True
             }
           }
-  
+
     # Define document action
     if action_dict:
       result_dict['_actions'] = action_dict
-  
-  
+
   elif mode == 'search':
     #################################################
     # Portal catalog search
     #
     # Possible call arguments example:
     #  form_relative_url: portal_skins/erp5_web/WebSite_view/listbox
-    #  list_method: objectValues                      (Script providing listing)
+    #  list_method: objectValues                      (Script providing items)
     #  default_param_json: <base64 encoded JSON>      (Additional search params)
     #  query: <str>                                   (term for fulltext search)
     #  select_list: ['int_index', 'id', 'title', ...] (column names to select)
     #  limit: [15, 16]                                (begin_index, num_records)
     #  local_roles: TODO
+    #
+    # Default Param JSON contains
+    #  portal_type: list of Portal Types to include (singular form matches the
+    #                                                catalog column name)
+    #
+    # Discussion:
+    #
+    #  Why you didn't use ListBoxRendererLine?
+    #  > Method 'search' is used for getting related objects as well which are
+    #  > not backed up by a ListBox thus the value resolution would have to be
+    #  > there anyway. It is better to use one code for all in this case.
     #################################################
     if REQUEST.other['method'] != "GET":
       response.setStatus(405)
       return ""
-  
+
+    # in case we have custom list method
+    catalog_kw = {}
+
     # hardcoded responses for site and portal objects (which are not Documents!)
+    # we let the flow to continue because the result of a list_method call can
+    # be similar - they can in practice return anything
     if query == "__root__":
-      sql_list = [site_root]
+      search_result_iterable = [site_root]
     elif query == "__portal__":
-      sql_list = [portal]
+      search_result_iterable = [portal]
     else:
+      # otherwise gather kwargs for list_method and get whatever result it gives
+      callable_list_method = portal.portal_catalog
+      if list_method:
+        callable_list_method = getattr(traversed_document, list_method)
+
       catalog_kw = {
         "local_roles": local_roles,
         "limit": limit,
-        "sort_on": ()  # default is empty tuple
+        "sort_on": ()  # default is an empty tuple
       }
       if default_param_json is not None:
-        catalog_kw.update(byteify(json.loads(urlsafe_b64decode(default_param_json))))
+        catalog_kw.update(
+          ensure_deserialized(
+            byteify(
+              json.loads(urlsafe_b64decode(default_param_json)))))
       if query:
         catalog_kw["full_text"] = query
+
       if sort_on is not None:
+        def parse_sort_on(raw_string):
+          """Turn JSON serialized array into a tuple (col_name, order)."""
+          sort_col, sort_order = json.loads(raw_string)
+          sort_col, sort_order = byteify(sort_col), byteify(sort_order)
+          # JIO keeps sort order as whole word 'ascending' resp. 'descending'
+          if sort_order.lower().startswith("asc"):
+            sort_order = "ASC"
+          elif sort_order.lower().startswith("desc"):
+            sort_order = "DESC"
+          else:
+            # should raise an ValueError instead
+            context.log('Wrong sort order "{}" in {}! It must start with "asc" or "desc"'.format(sort_order, form_relative_url),
+                        level=200)  # error
+          return (sort_col, sort_order)
+
         if isinstance(sort_on, list):
-          catalog_kw['sort_on'] = tuple((byteify(sort_col), byteify(sort_order))
-                                         for sort_col, sort_order in map(json.loads, sort_on))
+          # sort_on argument is always a list of tuples(col_name, order)
+          catalog_kw['sort_on'] = list(map(parse_sort_on, sort_on))
         else:
-          sort_col, sort_order = json.loads(sort_on)
-          catalog_kw['sort_on'] = ((byteify(sort_col), byteify(sort_order)), )
+          catalog_kw['sort_on'] = [parse_sort_on(sort_on), ]
 
-      if (list_method is None):
-        callable_list_method = portal.portal_catalog
-      else:
-        callable_list_method = getattr(traversed_document, list_method)
+      # Some search scripts impertinently grab their arguments from REQUEST
+      # instead of being nice and specify them as their input parameters.
+      #
+      # We expect that wise and mighty ListBox did copy all form field values
+      # from its REQUEST into `default_param_json` so we can put them back.
+      #
+      # XXX Kato: Seems that current scripts are behaving nicely (using only
+      # specified input parameters). In case some list_method does not work
+      # this is the first place to try to uncomment.
+      #
+      # for k, v in catalog_kw.items():
+      #   REQUEST.set(k, v)
 
-      sql_list = callable_list_method(**catalog_kw)
-
-    result_list = []  # returned "content" of the search
+      search_result_iterable = callable_list_method(**catalog_kw)
 
     # Cast to list if only one element is provided
-    editable_field_dict = {}
     if select_list is None:
       select_list = []
     elif same_type(select_list, ""):
       select_list = [select_list]
-  
-    if select_list:
-      if (form_relative_url is not None):
-        listbox_field = portal.restrictedTraverse(form_relative_url)
-        listbox_field_id = listbox_field.id
-        # XXX Proxy field are not correctly handled in traversed_document of web site
-        listbox_form = getattr(traversed_document, listbox_field.aq_parent.id)
-        for select in select_list:
-          # See Listbox.py getValueList --> getEditableField & getColumnAliasList method
-          tmp = select.replace('.', '_')
-          if listbox_form.has_field("%s_%s" % (listbox_field_id, tmp), include_disabled=1):
-            editable_field_dict[select] = listbox_form.get_field("%s_%s" % (listbox_field_id, tmp), include_disabled=1)
-  
+
+    # extract form field definition into `editable_field_dict`
+    editable_field_dict = {}
+    if form_relative_url is not None:
+      listbox_field = portal.restrictedTraverse(form_relative_url)
+      listbox_field_id = listbox_field.id
+      # XXX Proxy field are not correctly handled in traversed_document of web site
+      listbox_form = getattr(traversed_document, listbox_field.aq_parent.id)
+      for select in select_list:
+        # See Listbox.py getValueList --> getEditableField & getColumnAliasList method
+        # In short: there are Form Field definitions which names start with
+        # matching ListBox name - those are template fields to be rendered in
+        # cells with actual values defined by row and column
+        field_name = "{}_{}".format(listbox_field_id, select.replace(".", "_"))
+        if listbox_form.has_field(field_name, include_disabled=1):
+          editable_field_dict[select] = listbox_form.get_field(field_name, include_disabled=1)
+
     # handle the case when list-scripts are ignoring `limit` - paginate for them
     if limit is not None and isinstance(limit, (tuple, list)):
       start, num_items = map(int, limit)
-      if len(sql_list) <= num_items:
+      if len(search_result_iterable) <= num_items:
         # the limit was most likely taken into account thus we don't need to slice
-        start, num_items = 0, len(sql_list)
+        start, num_items = 0, len(search_result_iterable)
     else:
-      start, num_items = 0, len(sql_list)
+      start, num_items = 0, len(search_result_iterable)
 
-    for document_index, sql_document in enumerate(sql_list):
-      if document_index < start:
+    # go through documents and assign values into result_dict._embedded
+    contents_list = []  # returned "content" of the search
+    result_dict.update({
+      '_query': query,
+      '_local_roles': local_roles,
+      '_limit': limit,
+      '_select_list': select_list,
+      '_embedded': {
+        'contents': contents_list
+      }
+    })
+
+    # now fill in `contents_list` with actual information
+    # beware that search_result_iterable can hide anything inside!
+    for result_index, search_result in enumerate(search_result_iterable):
+      # skip documents out of `limit`
+      if result_index < start:
         continue
-      if document_index >= start + num_items:
+      if result_index >= start + num_items:
         break
 
-      try:
-        document = sql_document.getObject()
-      except AttributeError:
-        # XXX ERP5 Site is not an ERP5 document
-        document = sql_document
-      document_uid = sql_document.uid
-      document_result = {
-        '_links': {
-          'self': {
-            "href": default_document_uri_template % {
-              "root_url": site_root.absolute_url(),
-              # XXX ERP5 Site is not an ERP5 document
-              "relative_url": getRealRelativeUrl(document) or document.getId(), 
-              "script_id": script.id
-            },
+      contents_item = {}
+      contents_list.append(contents_item)
+
+      # Fields, which are used to render results of search, use TALES to obtain
+      # their other properties. Thus we set up REQUEST.here which is used in TAL
+      #
+      # XXX Kato: This might be wrong since search_result is expected in 'cell' and
+      # 'here' is reserved for a traversed_document
+      # REQUEST.set('here', search_result)
+
+      contents_uid = None
+      if hasattr(search_result, "getObject"):
+        # search_result = search_result.getObject()
+        contents_uid = search_result.uid
+        # every document indexed in catalog has to have relativeUrl
+        contents_relative_url = getRealRelativeUrl(search_result)
+        # get property in secure way from documents
+        search_property_getter = getProtectedProperty
+        def search_property_hasser (doc, attr):
+          """Brains cannot access Properties - they use permissioned getters."""
+          try:
+            return doc.hasProperty(attr)
+          except (AttributeError, Unauthorized) as e:
+            context.log('Cannot state ownership of property "{}" on {!s} because of "{!s}"'.format(
+              attr, doc, e))
+            return False
+      elif hasattr(search_result, "aq_self"):
+        # Zope products have at least ID thus we work with that
+        contents_uid = search_result.uid
+        # either we got a document with relativeUrl or we got product and use ID
+        contents_relative_url = getRealRelativeUrl(search_result) or search_result.getId()
+        # documents and products have the same way of accessing properties
+        search_property_getter = getProtectedProperty
+        search_property_hasser = lambda doc, attr: doc.hasProperty(attr)
+      else:
+        # In case of reports the `search_result` can be list of
+        # PythonScripts.standard._Object - a reimplementation of plain dictionary
+
+        # means we are iterating over plain objects
+        # list_method must be defined because POPOs can return only that
+        contents_uid = "{}#{:d}".format(list_method, result_index)
+        # JIO requires every item to have _links.self.href so it can construct
+        # links to the document. Here we have a object in RAM (which should
+        # never happen!) thus we provide temporary UID
+        contents_relative_url = "{}/{}".format(traversed_document.getRelativeUrl(), contents_uid)
+        # property getter must be simple __getattr__ implementation
+        search_property_getter = lambda obj, attr: getattr(obj, attr, None)
+        search_property_hasser = lambda obj, attr: hasattr(obj, attr)
+
+      # _links.self.href is mandatory for JIO so it can create reference to the
+      # (listbox) item alone
+      contents_item['_links'] = {
+        'self': {
+          "href": default_document_uri_template % {
+            "root_url": site_root.absolute_url(),
+            "relative_url": contents_relative_url,
+            "script_id": script.id
           },
-        }
+        },
       }
+      # ERP5 stores&send the list of editable elements in a hidden field called
+      # only database results can be editable so it belongs here
       if editable_field_dict:
-        document_result['listbox_uid:list'] = {
+        contents_item['listbox_uid:list'] = {
           'key': "%s_uid:list" % listbox_field_id,
-          'value': document_uid
+          'value': contents_uid
         }
+      # render whole field in contents_item or at least search result value
       for select in select_list:
         if editable_field_dict.has_key(select):
-          REQUEST.set('cell', sql_document)
-  
-          if ('default' in editable_field_dict[select].tales):
-            tmp_value = None
-          else:
-            tmp_value = getProtectedProperty(document, select)
-  
-          property_value = renderField(
-            traversed_document, editable_field_dict[select], form, tmp_value,
-            key='field_%s_%s' % (editable_field_dict[select].id, document_uid))
+          # cell has a Form Field template thus render it using the field
+          REQUEST.set('cell', search_result)
+          # if default value is given by evaluating Tales expression then we only
+          # put "cell" to request (expected by tales) and let the field evaluate
+          default_field_value = None
+          if getattr(editable_field_dict[select].tales, "default", "") == "":
+            # if there is no tales expr (or is empty) we extract the value from search result
+            default_field_value = search_property_getter(search_result, select)
+
+          contents_item[select] = renderField(
+            traversed_document,
+            editable_field_dict[select],
+            listbox_form,
+            value=default_field_value,
+            key='field_%s_%s' % (editable_field_dict[select].id, contents_uid))
+
           REQUEST.other.pop('cell', None)
+
         else:
-          property_value = getProtectedProperty(document, select)
-        if property_value is not None:
-          if same_type(property_value, DateTime()):
-            # Serialize DateTime
-            property_value = property_value.rfc822()
-          elif isinstance(property_value, datetime.date):
-            property_value = formatdate(time.mktime(property_value.timetuple()))
-          elif getattr(property_value, 'translate', None) is not None:
-            property_value = "%s" % property_value
-          document_result[select] = property_value
-      result_list.append(document_result)
-    result_dict['_embedded'] = {"contents": result_list}
-  
-    result_dict['_query'] = query
-    result_dict['_local_roles'] = local_roles
-    result_dict['_limit'] = limit
-    result_dict['_select_list'] = select_list
-  
+          # if the variable does not have a field template we need to find its
+          # value by resolving value in the correct order. The code is copy&pasted
+          # from ListBoxRendererLine.getValueList because it is universal
+          contents_value = None
+
+          if not isinstance(select, (str, unicode)) or len(select) == 0:
+            context.log('There is an invalid column name in {!s}!'.format(select_list), level=200)
+            continue
+
+          if "." in select:
+            select = select[select.rindex('.') + 1:]
+
+          # 1. resolve attribute on a raw object (all wrappers removed) using
+          # lowest-level secure getattr method given object type
+          raw_search_result = search_result
+          if hasattr(search_result, 'aq_base'):
+            raw_search_result = search_result.aq_base
+
+          if search_property_hasser(raw_search_result, select):
+            contents_value = search_property_getter(raw_search_result, select)
+
+          # 2. use the fact that wrappers (brain or acquisition wrapper) use
+          # permissioned getters
+          unwrapped_search_result = search_result
+          if hasattr(search_result, 'aq_self'):
+            unwrapped_search_result = search_result.aq_self
+
+          if contents_value is None:
+            if not select.startswith('get') and select[0] not in string.ascii_uppercase:
+              # maybe a hidden getter (variable accessible by a getter)
+              accessor_name = 'get' + UpperCase(select)
+            else:
+              # or obvious getter (starts with "get" or Capital letter - Script)
+              accessor_name = select
+            # again we check on a unwrapped object to avoid acquisition resolution
+            # which would certainly find something which we don't want
+            try:
+              if hasattr(raw_search_result, accessor_name) and callable(getattr(search_result, accessor_name)):
+                # test on raw object but get the actual accessor using wrapper and acquisition
+                # do not call it here - it will be done later in generic call part
+                contents_value = getattr(search_result, accessor_name)
+            except (AttributeError, KeyError, Unauthorized) as error:
+              context.log("Could not evaluate {} nor {} on {} with error {!s}".format(
+                select, accessor_name, search_result, error), level=100)  # WARNING
+
+          if contents_value is None and search_property_hasser(search_result, select):
+            # maybe it is just a attribute
+            contents_value = search_property_getter(search_result, select)
+
+          if contents_value is None:
+            try:
+              contents_value = getattr(search_result, select, None)
+            except (Unauthorized, AttributeError, KeyError) as error:
+              context.log("Cannot resolve {} on {!s} because {!s}".format(
+                select, raw_search_result, error), level=100)
+
+          if callable(contents_value):
+            has_mandatory_param = False
+            has_brain_param = False
+            if hasattr(contents_value, "params"):
+              has_mandatory_param = any(map(lambda param: '=' not in param and '*' not in param,
+                                            contents_value.params().split(","))) \
+                                    if contents_value.params() \
+                                    else False # because any([]) == True
+              has_brain_param = "brain" in contents_value.params()
+            try:
+              if has_mandatory_param:
+                contents_value = contents_value(search_result)
+              elif has_brain_param:
+                contents_value = contents_value(brain=search_result)
+              else:
+                contents_value = contents_value()
+            except (AttributeError, KeyError, Unauthorized) as error:
+              context.log("Could not evaluate {} on {} with error {!s}".format(
+                contents_value, search_result, error), level=100)  # WARNING
+          # make resulting value JSON serializable
+          if contents_value is not None:
+            if same_type(contents_value, DateTime()):
+              # Serialize DateTime
+              contents_value = contents_value.rfc822()
+            elif isinstance(contents_value, datetime.date):
+              contents_value = formatdate(time.mktime(contents_value.timetuple()))
+            elif hasattr(contents_value, 'translate'):
+              contents_value = "%s" % contents_value
+
+          contents_item[select] = contents_value
+
+    # We should cleanup the selection if it exists in catalog params BUT
+    # we cannot because it requires escalated Permission.'modifyPortal' so
+    # the correct solution would be to ReportSection.popReport but unfortunately
+    # we don't have it anymore because we are asynchronous
+
   elif mode == 'form':
     #################################################
     # Calculate form value

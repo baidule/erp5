@@ -66,14 +66,26 @@ def simulate(script_id, params_string, code_string):
     return decorated
   return upperWrap
 
-def createIndexedDocument():
-  """Create a Foo document inside Foo module and pass it as "document" argument into wrapped function."""
+def wipeFolder(folder):
+  folder.deleteContent(list(folder.objectIds()))
+  transaction.commit()
+
+def createIndexedDocument(quantity=1):
+  """Create `quantity` Foo document(s) in Foo module and pass it as `document(_list)` argument into the wrapped function."""
   def decorator(func):
     def wrapped(self, *args, **kwargs):
-      kwargs.update(document=self._makeDocument())
+      wipeFolder(self.portal.foo_module)
+      if quantity <= 1:
+        kwargs.update(document=self._makeDocument())
+      else:
+        kwargs.update(document_list=[self._makeDocument() for _ in range(quantity)])
       self.portal.portal_caches.clearAllCache()
       self.tic()
-      return func(self, *args, **kwargs)
+      try:
+        return func(self, *args, **kwargs)
+      finally:
+        wipeFolder(self.portal.foo_module)
+        self.tic() # unindex
     return wrapped
   return decorator
 
@@ -1037,6 +1049,82 @@ class TestERP5Document_getHateoas_mode_search(ERP5HALJSONStyleSkinsMixin):
       REQUEST=fake_request,
       mode="search",
       default_param_json='eyJcdTAwZWEiOiAiXHUwMGU4In0=')
+
+  @simulate('Base_getRequestUrl', '*args, **kwargs', 'return "http://example.org/bar"')
+  @simulate('Base_getRequestHeader', '*args, **kwargs', 'return "application/hal+json"')
+  @simulate('Test_listObjects', '*args, **kwargs', """
+from Products.PythonScripts.standard import Object
+return [Object(debit_price=1000.00, credit_price=100.00),
+        Object(debit_price=10.00, credit_price=0.00)]
+""")
+  @simulate('Test_listProducts', '*args, **kwargs', """
+return context.getPortalObject().foo_module.values()
+""")
+  @simulate('Test_listCatalog', '*args, **kwargs', """
+return context.getPortalObject().portal_catalog(portal_type='Foo', sort_on=[('id', 'ASC')])
+""")
+  @createIndexedDocument(quantity=2)
+  @changeSkin('Hal')
+  def test_getHateoas_exotic_search_results(self, document_list):
+    """Test that ingestion of `list_method` result does not fail.
+
+    The only limit for the result of `list_method` is that it should be an iterable.
+    Practically, because we code in python, it can be any object.
+    """
+    fake_request = do_fake_request("GET")
+    result = self.portal.web_site_module.hateoas.ERP5Document_getHateoas(
+      REQUEST=fake_request,
+      mode="search",
+      local_roles=["Assignor", "Assignee"],
+      list_method='Test_listObjects',
+      select_list=['credit_price', 'debit_price']
+    )
+    self.assertEquals(fake_request.RESPONSE.status, 200)
+    self.assertEquals(fake_request.RESPONSE.getHeader('Content-Type'),
+      "application/hal+json"
+    )
+    result_dict = json.loads(result)
+    self.assertEqual(len(result_dict['_embedded']['contents']), 2)
+    self.assertEqual(result_dict['_embedded']['contents'][0]['debit_price'],  1000.0)
+    self.assertEqual(result_dict['_embedded']['contents'][0]['credit_price'],  100.0)
+    self.assertEqual(result_dict['_embedded']['contents'][1]['debit_price'],    10.0)
+    self.assertEqual(result_dict['_embedded']['contents'][1]['credit_price'],    0.0)
+
+    # Render a Document using Form Field template (only for field 'id')
+    result = self.portal.web_site_module.hateoas.ERP5Document_getHateoas(
+      REQUEST=fake_request,
+      mode="search",
+      local_roles=["Assignor", "Assignee"],
+      list_method='Test_listProducts',
+      select_list=['id'],
+      form_relative_url='portal_skins/erp5_ui_test/FooModule_viewFooList/listbox'
+    )
+    result_dict = json.loads(result)
+    self.assertEqual(2, len(result_dict['_embedded']['contents']))
+    self.assertIn("field_listbox", result_dict['_embedded']['contents'][0]['id']['key'])
+    self.assertEqual("StringField", result_dict['_embedded']['contents'][0]['id']['type'])
+    self.assertEqual(document_list[0].getId(), result_dict['_embedded']['contents'][0]['id']['default'])
+    self.assertIn("field_listbox", result_dict['_embedded']['contents'][1]['id']['key'])
+    self.assertEqual("StringField", result_dict['_embedded']['contents'][1]['id']['type'])
+    self.assertEqual(document_list[1].getId(), result_dict['_embedded']['contents'][1]['id']['default'])
+
+    # Test rendering without form template of attribute, getterm and a script
+    result = self.portal.web_site_module.hateoas.ERP5Document_getHateoas(
+      REQUEST=fake_request,
+      mode="search",
+      local_roles=["Assignor", "Assignee"],
+      list_method='Test_listCatalog',
+      select_list=['title', 'Foo_getLocalTitle', 'getTotalQuantity'] # property, Script, method
+    )
+    result_dict = json.loads(result)
+    self.assertEqual(len(result_dict['_embedded']['contents']), 2)
+    self.assertEqual(result_dict['_embedded']['contents'][0]['title'].encode('utf-8'), document_list[0].getTitle())
+    self.assertEqual(result_dict['_embedded']['contents'][0]['Foo_getLocalTitle'], None)
+    self.assertEqual(result_dict['_embedded']['contents'][0]['getTotalQuantity'], 0)
+    self.assertEqual(result_dict['_embedded']['contents'][1]['title'].encode('utf-8'), document_list[1].getTitle())
+    self.assertEqual(result_dict['_embedded']['contents'][1]['Foo_getLocalTitle'], None)
+    self.assertEqual(result_dict['_embedded']['contents'][1]['getTotalQuantity'], 0)
+
 
 class TestERP5Document_getHateoas_mode_bulk(ERP5HALJSONStyleSkinsMixin):
 
