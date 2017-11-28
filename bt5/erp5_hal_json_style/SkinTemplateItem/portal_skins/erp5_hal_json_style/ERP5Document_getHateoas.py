@@ -1,3 +1,26 @@
+"""Hello. This will be long because this goodness script does almost everything.
+
+In general it always returns a JSON reponse in HATEOAS format specification.
+
+:param REQUEST: HttpRequest holding GET and/or POST data
+:param response:
+:param view: either "view" or absolute URL of an ERP5 Action
+:param mode: {str} help to decide what user wants from us "form" | "search" ...
+:param relative_url: an URL of `traversed_document` to operate on (it must have an object_view)
+
+Only in mode == 'search'
+:param query:
+:param select_list:
+:param limit:
+:param form_relative_url: {str} relative URL of a form FIELD issuing the search (listbox/relation field...)
+
+Only in mode == 'form'
+:param form:
+
+Only in mode == 'traverse'
+
+TBD.
+"""
 from ZTUtils import make_query
 import json
 from base64 import urlsafe_b64encode, urlsafe_b64decode
@@ -384,7 +407,6 @@ def renderField(traversed_document, field, form, value=None, meta_type=None, key
 #         line[title] = prop
 #         line["_relative_url"] = document.getRelativeUrl()
 #       line_list.append(line)
-
     result.update({
       "column_list": column_list,
       "search_column_list": search_column_list,
@@ -593,6 +615,7 @@ def renderRawField(field):
 
 
 def renderFormDefinition(form, response_dict):
+  """Form "definition" is configurable in Zope admin: Form -> Order."""
   group_list = []
   for group in form.Form_getGroupTitleAndId():
 
@@ -834,7 +857,6 @@ def calculateHateoas(is_portal=None, is_site_root=None, traversed_document=None,
       # renderer_form = traversed_document.restrictedTraverse(form_id, None)
       # XXX Proxy field are not correctly handled in traversed_document of web site
       renderer_form = getattr(traversed_document, form_id)
-  #     traversed_document.log(form_id)
       if (renderer_form is not None):
         embedded_dict = {
           '_links': {
@@ -1212,6 +1234,7 @@ hateoas = calculateHateoas(is_portal=temp_is_portal, is_site_root=temp_is_site_r
                            restricted=restricted, list_method=list_method,
                            default_param_json=default_param_json,
                            form_relative_url=form_relative_url)
+
 if hateoas == "":
   return hateoas
 else:
