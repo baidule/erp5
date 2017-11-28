@@ -165,7 +165,6 @@ for field in form.get_fields():
 
 
 if len(listbox_id_list):
-  can_redirect = 0
   # Warn if there are more than one listbox in form ...
   if len(listbox_id_list) > 1:
     log('Base_callDialogMethod', 'There are %s listboxes in form %s.' % (len(listbox_id_list), form.id))
@@ -240,14 +239,13 @@ if dialog_method != update_method and clean_kw.get('deferred_style', 0):
     request.set('deferred_style_dialog_method', dialog_method)
     dialog_method = 'Base_activateSimpleView'
 
-
 url_params_string = make_query(clean_kw)
 
-# XXX: We always redirect in report mode to make sure portal_skin
-# parameter is taken into account by SkinTool.
-# If url is too long, we do not redirect to avoid crash.
-# XXX: 2000 is an arbitrary value resulted from trial and error.
-if (not(can_redirect) or len(url_params_string) > 2000):
+# Never redirect in JSON style - do as much as possible here.
+# At this point the 'dialog_method' should point to a form (if we are in report)
+# if we are not in Deferred mode - then it points to `Base_activateSimpleView`
+
+if True:
   if dialog_method != update_method:
     # When we are not executing the update action, we have to change the skin
     # manually,
