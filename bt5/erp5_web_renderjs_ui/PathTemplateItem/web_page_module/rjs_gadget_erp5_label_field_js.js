@@ -84,6 +84,8 @@
       });
     })
 
+    .declareAcquiredMethod("notifyChange", "notifyChange")
+
     .declareMethod('render', function (options) {
       var state_dict = {
         label_text: options.field_json.title || '',
@@ -105,7 +107,8 @@
 
     .onStateChange(function (modification_dict) {
       var gadget = this,
-        span;
+        span,
+        promise_queue = new RSVP.Queue();
 
       if (gadget.state.hidden) {
         this.element.hidden = true;
@@ -123,16 +126,25 @@
       }
 
       if (modification_dict.hasOwnProperty('error_text')) {
-        // first remove old errors
-        span = this.state.container_element.querySelector('span');
-        if (span) {
-          this.state.container_element.removeChild(span);
-        }
-        // display new error if present
-        if (this.state.error_text) {
-          span = document.createElement('span');
-          span.textContent = this.state.error_text;
-          this.state.container_element.appendChild(span);
+        if (this.state.hidden) {
+          promise_queue.push(function () {
+            return gadget.notifyChange({
+              "message": gadget.state.error_text,
+              "status": "error"
+            });
+          });
+        } else {
+          // first remove old errors
+          span = this.state.container_element.querySelector('span');
+          if (span) {
+            this.state.container_element.removeChild(span);
+          }
+          // display new error if present
+          if (this.state.error_text) {
+            span = document.createElement('span');
+            span.textContent = this.state.error_text;
+            this.state.container_element.appendChild(span);
+          }
         }
       }
 
@@ -147,7 +159,7 @@
 
       if (modification_dict.hasOwnProperty('options')) {
         if (this.state.field_url) {
-          return new RSVP.Queue()
+          return promise_queue
             .push(function () {
               if (modification_dict.hasOwnProperty('field_url')) {
                 return gadget.declareGadget(gadget.state.field_url, {
