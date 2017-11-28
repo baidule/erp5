@@ -4,6 +4,11 @@
   "use strict";
 
   function isGoodNonEditableField(field) {
+    // First catch input value errors
+    if (field == undefined || field == null) {return false; }
+    if (!field.hasOwnProperty("type")) {
+      return false;
+    }
     // ListBox and FormBox should always get a chance to render
     if (field.type === "ListBox") {return true; }
     if (field.type === "FormBox") {return true; }
@@ -45,6 +50,7 @@
     .declareMethod('render', function (options) {
       var state_dict = {
         jio_key: options.jio_key,
+        title: options.title,
         view: options.view,
         editable: options.editable,
         erp5_document: options.erp5_document,
@@ -76,6 +82,7 @@
           form_options.erp5_document = gadget.state.erp5_document;
           form_options.form_definition = gadget.state.form_definition;
           form_options.view = gadget.state.view;
+          form_options.title = gadget.state.title;
           form_options.jio_key = gadget.state.jio_key;
           form_options.editable = 0; // because for editable=1 there is a special
                                      // page template 'pt_form_editable'. Once it is

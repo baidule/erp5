@@ -142,17 +142,20 @@ url_template_dict = {
 default_document_uri_template = url_template_dict["jio_get_template"]
 Base_translateString = context.getPortalObject().Base_translateString
 
+
 def getRealRelativeUrl(document):
   return '/'.join(portal.portal_url.getRelativeContentPath(document))
 
+
 def getFormRelativeUrl(form):
   return portal.portal_catalog(
-    portal_type="ERP5 Form",
+    portal_type=("ERP5 Form", "ERP5 Report"),
     uid=form.getUid(),
     id=form.getId(),
     limit=1,
     select_dict={'relative_url': None}
   )[0].relative_url
+
 
 def getFieldDefault(traversed_document, field, key, value=None):
   # REQUEST.get(field.id, field.get_value("default"))
@@ -164,6 +167,9 @@ def getFieldDefault(traversed_document, field, key, value=None):
 
 def renderField(traversed_document, field, form, value=None, meta_type=None, key=None, key_prefix=None, selection_params=None):
   """Extract important field's attributes into `result` dictionary."""
+
+  if selection_params is None:
+    selection_params = {}
 
   if meta_type is None:
     meta_type = field.meta_type
@@ -370,11 +376,20 @@ def renderField(traversed_document, field, form, value=None, meta_type=None, key
     return result
 
   if meta_type == "ListBox":
-    """Display list of objects with optional search/sort capabilities on columns from catalog."""
+    """Display list of objects with optional search/sort capabilities on columns from catalog.
+
+    We might be inside a ReportBox which is inside a parent form BUT we still have access to
+    the original REQUEST with sent POST values from the parent form. We can save those
+    values into our query method and reconstruct them meanwhile calling asynchronous jio.allDocs.
+    """
     _translate = Base_translateString
 
-    column_list = [(name, _translate(title)) for name, title in field.get_value("columns")]
-    editable_column_list = [(name, _translate(title)) for name, title in field.get_value("editable_columns")]
+    # column definition in ListBox own value 'columns' is superseded by dynamic
+    # column definition from Selection for specific Report ListBoxes; the same for editable_columns
+    column_list = [(name, _translate(title)) for name, title in (selection_params.get('selection_columns', [])
+                                                                 or field.get_value("columns"))]
+    editable_column_list = [(name, _translate(title)) for name, title in (selection_params.get('editable_columns', [])
+                                                                          or field.get_value("editable_columns"))]
     catalog_column_list = [(name, title)
                            for name, title in column_list
                            if sql_catalog.isValidColumn(name)]
@@ -572,6 +587,12 @@ def renderField(traversed_document, field, form, value=None, meta_type=None, key
 
 
 def renderForm(traversed_document, form, response_dict, key_prefix=None, selection_params=None):
+  """
+  :param selection_params: holds parameters to construct ERP5Form.Selection instance
+      for underlaying ListBox - since we do not use selections in RenderJS UI
+      we mitigate the functionality here by overriding ListBox's own values
+      for columns, editable columns, and sort with those found in `selection_params`
+  """
   REQUEST.set('here', traversed_document)
   field_errors = REQUEST.get('field_errors', {})
 
@@ -651,25 +672,78 @@ def renderForm(traversed_document, form, response_dict, key_prefix=None, selecti
   }
 
   if (form.pt == 'report_view'):
+    # reports are expected to return list of ReportSection which is a wrapper
+    # around a form - thus we will need to render those forms
     report_item_list = []
     report_result_list = []
     for field in form.get_fields():
       if field.getRecursiveTemplateField().meta_type == 'ReportBox':
+        # ReportBox.render returns a list of ReportSection classes which are
+        # just containers for FormId(s) usually containing one ListBox
+        # and its search/query parameters hidden in `selection_params`
+        # `path` contains relative_url of intended CONTEXT for underlaying ListBox
         report_item_list.extend(field.render())
-    j = 0
-    for report_item in report_item_list:
-      report_context = report_item.getObject(portal)
-      report_prefix = 'x%s' % j
-      j += 1
+    # ERP5 Report document differs from a ERP5 Form in only one thing: it has
+    # `report_method` attached to it - thus we call it right here
+    if hasattr(form, 'report_method') and getattr(form, 'report_method', ""):
+      report_method_name = getattr(form, 'report_method')
+      report_method = getattr(traversed_document, report_method_name)
+      report_item_list.extend(report_method())
+
+    for report_index, report_item in enumerate(report_item_list):
+      report_context = report_item.getObject(traversed_document)
+      report_prefix = 'x%s' % report_index
       report_title = report_item.getTitle()
       # report_class = "report_title_level_%s" % report_item.getLevel()
       report_form = report_item.getFormId()
       report_result = {'_links': {}}
-      renderForm(traversed_document, getattr(report_context, report_item.getFormId()),
-                 report_result, key_prefix=report_prefix,
-                 selection_params=report_item.selection_params)
-      report_result_list.append(report_result)
+      # some reports save a lot of unserializable data (datetime.datetime) and
+      # key "portal_type" (don't confuse with "portal_types" in ListBox) into
+      # report_item.selection_params thus we need to take that into account in
+      # ListBox field
+      #
+      # Selection Params are parameters for embedded ListBox's List Method
+      # and it must be passed in `default_json_param` field (might contain
+      # unserializable data types thus we need to take care of that
+      # In order not to lose information we put all ReportSection attributes
+      # inside the report selection params
+      report_form_params = report_item.selection_params.copy() \
+                           if report_item.selection_params is not None \
+                           else {}
 
+      if report_item.selection_name:
+        selection_name = report_prefix + "_" + report_item.selection_name
+        report_form_params.update(selection_name=selection_name)
+        # this should load selections with correct values - since it is modifying
+        # global state in the backend we have nothing more to do here
+        # I could not find where the code stores params in selection with render
+        # prefix - maybe it in some `render` method where it should not be
+        # Of course it is ugly, terrible and should be removed!
+        selection_tool = context.getPortalObject().portal_selections
+        selection_tool.getSelectionFor(selection_name, REQUEST)
+        selection_tool.setSelectionParamsFor(selection_name, report_form_params)
+        selection_tool.setSelectionColumns(selection_name, report_item.selection_columns)
+
+      if report_item.selection_columns:
+        report_form_params.update(selection_columns=report_item.selection_columns)
+      if report_item.selection_sort_order:
+        report_form_params.update(selection_sort_order=report_item.selection_sort_order)
+
+      # Report section is just a wrapper around form thus we render it right
+      # we keep traversed_document because its Portal Type Class should be 
+      # addressable by the user = have actions (object_view) attached to it
+      # BUT! when Report Section defines `path` that is the new context for
+      # form rendering and subsequent searches...
+      renderForm(traversed_document if not report_item.path else report_context,
+                 getattr(report_context, report_item.getFormId()),
+                 report_result,
+                 key_prefix=report_prefix,
+                 selection_params=report_form_params)  # used to be only report_item.selection_params
+      # Report Title is important since there are more section on report page
+      # but often they render the same form with different data so we need to
+      # distinguish by the title at least.
+      report_result['title'] = report_title
+      report_result_list.append(report_result)
     response_dict['report_section_list'] = report_result_list
 
 # XXX form action update, etc
@@ -832,19 +906,23 @@ def calculateHateoas(is_portal=None, is_site_root=None, traversed_document=None,
     action_dict = {}
   #   result_dict['_relative_url'] = traversed_document.getRelativeUrl()
     result_dict['title'] = traversed_document.getTitle()
-  
+
     # Add a link to the portal type if possible
     if not is_portal:
-      result_dict['_links']['type'] = {
-        "href": default_document_uri_template % {
-          "root_url": site_root.absolute_url(),
-          "relative_url": portal.portal_types[traversed_document.getPortalType()]\
-                            .getRelativeUrl(), 
-          "script_id": script.id
-        },
-        "name": Base_translateString(traversed_document.getPortalType())
-      }
-      
+      # traversed_document should always have its Portal Type in ERP5 Portal Types
+      # thus attached actions to it so it is viewable
+      document_type_name = traversed_document.getPortalType()
+      document_type = getattr(portal.portal_types, document_type_name, None)
+      if document_type is not None:
+        result_dict['_links']['type'] = {
+          "href": default_document_uri_template % {
+            "root_url": site_root.absolute_url(),
+            "relative_url": document_type.getRelativeUrl(),
+            "script_id": script.id
+          },
+          "name": Base_translateString(traversed_document.getPortalType())
+        }
+
     # Return info about container
     if not is_portal:
       container = traversed_document.getParentValue()
@@ -1058,7 +1136,7 @@ def calculateHateoas(is_portal=None, is_site_root=None, traversed_document=None,
   
     else:
       traversed_document_portal_type = traversed_document.getPortalType()
-      if traversed_document_portal_type == "ERP5 Form":
+      if traversed_document_portal_type in ("ERP5 Form", "ERP5 Report"):
         renderFormDefinition(traversed_document, result_dict)
         response.setHeader("Cache-Control", "private, max-age=1800")
         response.setHeader("Vary", "Cookie,Authorization,Accept-Encoding")
